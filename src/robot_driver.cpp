@@ -4,8 +4,25 @@
 //Team Explorer(rescue robot)
 //Team Unware (NWPU Basketball robot)
 //this package get cmd_vel order and send it to handware
-//add func : move in robotic  coordinate system
-// add the topic "cmd_move_robot"
+
+
+/*
+*Team Unware Basketball Robot NWPU
+*
+*接收其他节点的移动指令，转化为下位机协议，并转发给串口节点，发给下位机控制移动
+*get data_type : geometry_msgs/Twist
+*out data_type : basketball_msgs::robot_message
+*
+*Author = liao-zhihan
+*
+*first_debug_date:2016-01-20
+*测试通过
+*/
+/*
+*		2016-7-9 update
+*add func : move in robotic  coordinate system
+*add the topic "/cmd_move_robot"  
+*/
 #include <ros/ros.h>
 #include <geometry_msgs/Twist.h>
 #include <basketball_msgs/robot_message.h>
@@ -27,11 +44,14 @@ private:
     ros::Subscriber cmd_vel_robot_sub_ ;
     ros::Publisher robot_message_pub_ ;
 private:
-    void cmdWorldMoveCallBack(const geometry_msgs::TwistConstPtr &ptr) ;
-    void cmdRobotMoveCallBack(const geometry_msgs::TwistConstPtr &ptr) ;
+    //消息回调函数
+    void cmdWorldMoveCallBack(const geometry_msgs::TwistConstPtr &ptr) ; //处理全局坐标系下速度的回调函数
+    void cmdRobotMoveCallBack(const geometry_msgs::TwistConstPtr &ptr) ; //处理机器人坐标系下速度回调函数 
+    //速度发布接口
     void pubBaseCmd(const uint8_t func, const double move_x, const double move_y, const double speed_w) ;
+    //急停接口
+    void brake() ;
 
-    void brake() ; 
 } ;
 
 RobotDriver::RobotDriver(ros::NodeHandle node)
@@ -41,9 +61,10 @@ RobotDriver::RobotDriver(ros::NodeHandle node)
 {
 //    p_nh_.param("wheel_center",wheel_center_,0.0) ;
 //    p_nh_.param("wheel_radius",wheel_radius_,0.0) ;
-    robot_message_pub_ = nh_.advertise<basketball_msgs::robot_message>("robot_cmd",1000) ;
-    cmd_vel_world_sub_ = nh_.subscribe("cmd_move",1,&RobotDriver::cmdWorldMoveCallBack,this) ;
-    cmd_vel_robot_sub_ = nh_.subscribe("cmd_move_robot",1,&RobotDriver::cmdRobotMoveCallBack,this) ;
+
+    robot_message_pub_ = nh_.advertise<basketball_msgs::robot_message>("robot_cmd",1000) ; //队列调大了
+    cmd_vel_world_sub_ = nh_.subscribe("cmd_move",1,&RobotDriver::cmdWorldMoveCallBack,this) ; //全局作坐标系下的速度话题
+    cmd_vel_robot_sub_ = nh_.subscribe("cmd_move_robot",1,&RobotDriver::cmdRobotMoveCallBack,this) ;//机器人坐标习的话题
 }
 
 
@@ -67,25 +88,24 @@ void RobotDriver::pubBaseCmd(const uint8_t func, const double move_x, const doub
 	data_ptr[0] = data_ptr[1] = 0xff ; 
 	data_ptr[2] = base_cmd_id_ ; 
 	data_ptr[3] = (u_int8_t)(data_len>>8) ;
-    	data_ptr[4] = (u_int8_t)(data_len & 0xff) ;
-    	data_ptr[5] = func ;
+   	data_ptr[4] = (u_int8_t)(data_len & 0xff) ;
+   	data_ptr[5] = func ;
 	*(float *)(data_ptr+6)  = move_x;
-    	*(float *)(data_ptr+10)  = move_y;
-    	*(float *)(data_ptr+14)  = speed_w;
+   	*(float *)(data_ptr+10)  = move_y;
+   	*(float *)(data_ptr+14)  = speed_w;
 	robot_message_pub_.publish(robot_cmd_msg) ; 
-}
+}	
 
 void RobotDriver::cmdWorldMoveCallBack(const geometry_msgs::TwistConstPtr &ptr)
 {
-    ROS_INFO("send cmd info\n") ; 
+    ROS_INFO("send cmd world info\n") ; 
     pubBaseCmd(0x01,ptr->linear.x , ptr->linear.y,ptr->angular.z);
 }
 void RobotDriver::cmdRobotMoveCallBack(const geometry_msgs::TwistConstPtr &ptr)
 {
-    ROS_INFO("send cmd  info\n") ; 
+    ROS_INFO("send cmd robot info\n") ; 
     pubBaseCmd(0x05,ptr->linear.x , ptr->linear.y,ptr->angular.z);
 }
-
 
 int main(int argc , char **argv)
 {
