@@ -1,3 +1,11 @@
+//author : rescuer liao
+//https://github.com/rescuer-liao
+//date : 2016 - 1 - 21
+//Team Explorer(rescue robot)
+//Team Unware (NWPU Basketball robot)
+//this package get cmd_vel order and send it to handware
+
+
 /*
 *Team Unware Basketball Robot NWPU
 *
@@ -10,11 +18,16 @@
 *first_debug_date:2016-01-20
 *测试通过
 */
-
+/*
+*		2016-7-9 update
+*add func : move in robotic  coordinate system
+*add the topic "/cmd_move_robot"
+*/
 #include <ros/ros.h>
 #include <geometry_msgs/Twist.h>
 #include <basketball_msgs/robot_message.h>
-
+#include <math.h>
+#define min_speed 0.07
 class RobotDriver
 {
 public:
@@ -28,15 +41,18 @@ private:
     double wheel_center_ ;
     double wheel_radius_ ;
     uint8_t base_cmd_id_ ;
-    ros::Subscriber cmd_vel_sub_ ;
+    ros::Subscriber cmd_vel_world_sub_ ;
+    ros::Subscriber cmd_vel_robot_sub_ ;
     ros::Publisher robot_message_pub_ ;
 private:
     //消息回调函数
-    void cmdMoveCallBack(const geometry_msgs::TwistConstPtr &ptr) ;
+    void cmdWorldMoveCallBack(const geometry_msgs::TwistConstPtr &ptr) ; //处理全局坐标系下速度的回调函数
+    void cmdRobotMoveCallBack(const geometry_msgs::TwistConstPtr &ptr) ; //处理机器人坐标系下速度回调函数
     //速度发布接口
     void pubBaseCmd(const uint8_t func, const double move_x, const double move_y, const double speed_w) ;
     //急停接口
     void brake() ;
+
 } ;
 
 RobotDriver::RobotDriver(ros::NodeHandle node)
@@ -46,8 +62,10 @@ RobotDriver::RobotDriver(ros::NodeHandle node)
 {
 //    p_nh_.param("wheel_center",wheel_center_,0.0) ;
 //    p_nh_.param("wheel_radius",wheel_radius_,0.0) ;
-    robot_message_pub_ = nh_.advertise<basketball_msgs::robot_message>("robot_cmd",10) ;
-    cmd_vel_sub_ = nh_.subscribe("cmd_move",1,&RobotDriver::cmdMoveCallBack,this) ;
+
+    robot_message_pub_ = nh_.advertise<basketball_msgs::robot_message>("robot_cmd",1000) ; //队列调大了
+    cmd_vel_world_sub_ = nh_.subscribe("cmd_move",1,&RobotDriver::cmdWorldMoveCallBack,this) ; //全局作坐标系下的速度话题
+    cmd_vel_robot_sub_ = nh_.subscribe("cmd_move_robot",1,&RobotDriver::cmdRobotMoveCallBack,this) ;//机器人坐标习的话题
 }
 
 
@@ -59,12 +77,11 @@ RobotDriver::~RobotDriver()
 
 void RobotDriver::brake()
 {
-	pubBaseCmd(0x01 , 0 , 0 , 0) ; 
+	pubBaseCmd(0x01 , 0 , 0 , 0) ;
 }
 
 void RobotDriver::pubBaseCmd(const uint8_t func, const double move_x, const double move_y, const double speed_w)
 {
-  //进行上下位机协议转换
 	basketball_msgs::robot_message robot_cmd_msg ;
 	robot_cmd_msg.data.resize(18 , 0) ;
 	uint8_t *data_ptr = robot_cmd_msg.data.data() ;
@@ -72,22 +89,46 @@ void RobotDriver::pubBaseCmd(const uint8_t func, const double move_x, const doub
 	data_ptr[0] = data_ptr[1] = 0xff ;
 	data_ptr[2] = base_cmd_id_ ;
 	data_ptr[3] = (u_int8_t)(data_len>>8) ;
-  data_ptr[4] = (u_int8_t)(data_len & 0xff) ;
-  data_ptr[5] = func ;
+   	data_ptr[4] = (u_int8_t)(data_len & 0xff) ;
+   	data_ptr[5] = func ;
 	*(float *)(data_ptr+6)  = move_x;
-  *(float *)(data_ptr+10)  = move_y;
-  *(float *)(data_ptr+14)  = speed_w;
-  //协议转换完成，向下位机发送指令
+   	*(float *)(data_ptr+10)  = move_y;
+   	*(float *)(data_ptr+14)  = speed_w;
 	robot_message_pub_.publish(robot_cmd_msg) ;
 }
 
-void RobotDriver::cmdMoveCallBack(const geometry_msgs::TwistConstPtr &ptr)
+void RobotDriver::cmdWorldMoveCallBack(const geometry_msgs::TwistConstPtr &ptr)
 {
-    ROS_INFO("send cmd info\n") ;
-    pubBaseCmd(0x01,ptr->linear.x , ptr->linear.y,ptr->angular.z);
+    ROS_INFO("send cmd world info\n") ;
+    double x =0.0,y = 0.0;
+    x = ptr->linear.x;
+    y = ptr->linear.y;
+    double s = sqrt(x*x+y*y);
+    //速度的小于0.038底盘自锁
+    if(s != 0.0 && s < min_speed )
+    {
+      x = min_speed*x/s;
+      y = min_speed*y/s;
+    }
+    pubBaseCmd(0x01,x , y,ptr->angular.z);
+  //  pubBaseCmd(0x01,ptr->linear.x , ptr->linear.y,ptr->angular.z);
 }
-
-
+void RobotDriver::cmdRobotMoveCallBack(const geometry_msgs::TwistConstPtr &ptr)
+{
+    ROS_INFO("send cmd robot info\n") ;
+    //速度的小于0.038底盘自锁
+    double x =0.0,y = 0.0;
+    x = ptr->linear.x;
+    y = ptr->linear.y;
+    double s = sqrt(x*x+y*y);
+    if(s !=0.0 && s < min_speed)
+    {
+      x = min_speed*x/s;
+      y = min_speed*y/s;
+    }
+    pubBaseCmd(0x05,x , y,ptr->angular.z);
+  //  pubBaseCmd(0x05,ptr->linear.x , ptr->linear.y,ptr->angular.z);
+}
 
 int main(int argc , char **argv)
 {
